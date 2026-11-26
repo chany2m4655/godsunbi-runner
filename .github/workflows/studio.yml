@@ -1,0 +1,35 @@
+# (2026-11-26 이전: godsunbi/.github/workflows/studio.yml) 공개 실행기로 이동 — 체크아웃→실행→godsunbi 로 커밋.
+name: studio
+on:
+  workflow_dispatch:
+    inputs:
+      debug: {description: "구조 출력(공개 로그에 응답 구조가 찍힘)", default: "0"}
+      probe: {description: "탐침 영상ID", default: ""}
+concurrency: {group: godsunbi-studio}
+permissions: {contents: read}
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: chany2m4655/godsunbi   # 비공개 저장소 (코드·데이터는 그대로 거기)
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          path: .runner                      # 이 저장소(배포·산출물 스크립트)
+      - name: 스튜디오 지표
+        env:
+          YT_STUDIO_COOKIE: ${{ secrets.YT_STUDIO_COOKIE }}
+          YT_STUDIO_PAGEID: ${{ secrets.YT_STUDIO_PAGEID }}
+          STUDIO_DEBUG: ${{ inputs.debug }}
+          PROBE: ${{ inputs.probe }}
+        run: |
+          if [ -z "$YT_STUDIO_COOKIE" ]; then echo "YT_STUDIO_COOKIE 비밀 없음 — 건너뜀"; exit 0; fi
+          if [ -n "$PROBE" ]; then python3 perf/studio_probe.py "$PROBE"; else python3 perf/studio.py; fi
+      - name: 커밋
+        run: |
+          git config user.name hot-bot; git config user.email hot-bot@users.noreply.github.com
+          git add perf/studio.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "스튜디오 지표 $(date -u +%m/%d\ %H:%M)" && git pull --rebase -q && git push -q)

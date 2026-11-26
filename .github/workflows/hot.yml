@@ -1,0 +1,87 @@
+# (2026-11-26 이전: godsunbi/.github/workflows/hot.yml) 공개 실행기로 이동 — 코드·데이터는 비공개 godsunbi 에 그대로, 여기선 체크아웃→실행→커밋만.
+name: 떡상 야담 수집
+on:
+  schedule:
+    - cron: "0 21,1,5,9,13 * * *"   # 하루 5번 통합 수집 KST 06·10·14·18·22시, 밤엔 안 함 — 떡상·레이더·성과 한꺼번에(2026-11-25, Actions 절약). 하루 1회 작업은 06시 회차(UTC 21).
+  workflow_dispatch:
+permissions:
+  contents: read   # 쓰기는 PRIVATE_REPO_TOKEN 으로 godsunbi 에
+concurrency:
+  group: godsunbi-hot
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: chany2m4655/godsunbi   # 비공개 저장소 (코드·데이터는 그대로 거기)
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          path: .runner                      # 이 저장소(배포·산출물 스크립트)
+      - name: 수집
+        env:
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}
+        run: |
+          if [ -z "$YT_API_KEY" ]; then echo "::warning::secret YT_API_KEY 가 없어 건너뜀"; echo SKIP=1 >> $GITHUB_ENV; exit 0; fi
+          if [ "$(date -u +%H)" = "21" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then (cd hot && python3 discover.py) || true; fi   # 새 채널 발굴: 하루 1회 KST 06시
+          python3 hot/collect.py
+          python3 hot/trend.py || true
+          python3 hot/factors.py || true
+          python3 hot/vph.py || true
+          python3 hot/lineage_link.py || true   # 떡상 ↔ 흥행 줄기 연동(로컬 계산, 쿼터 0)
+          python3 lineplan/build.py || true   # 🗓 줄기기획 월별 플랜(로컬 계산, 쿼터 0)
+          python3 hot/radar.py || true   # 🎯 따라잡기 레이더(로컬 계산, 쿼터 0)
+          python3 bench/build.py || true   # 🔁 벤치마킹 짝(로컬 계산, 쿼터 0)
+          python3 hot/underdog.py || true   # 🐣 소형채널 대박(구독≤1천·조회≥1만) 목록·특징(로컬 계산, 쿼터 0)
+      - name: ⏱ 타이밍(소형채널 대박 채널 첫 터짐 편수) — 하루 1회 KST 06시, 증분 약 100~150유닛
+        if: env.SKIP != '1'
+        continue-on-error: true
+        env:
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}
+        run: |
+          if [ "$(date -u +%H)" = "21" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then python3 timing/collect.py; else echo "06시 회차만 실행"; fi
+      - name: 📊 성과 수집(조회수) — 매 회차
+        if: env.SKIP != '1'
+        continue-on-error: true
+        env:
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}
+        run: python3 perf/collect.py
+      - name: 📊 성과 상세 지표 — 하루 1회 KST 06시
+        if: env.SKIP != '1'
+        continue-on-error: true
+        env:
+          YT_OAUTH_CLIENT_ID: ${{ secrets.YT_OAUTH_CLIENT_ID }}
+          YT_OAUTH_CLIENT_SECRET: ${{ secrets.YT_OAUTH_CLIENT_SECRET }}
+          YT_REFRESH_GODSUNBI: ${{ secrets.YT_REFRESH_GODSUNBI }}
+          YT_REFRESH_YADAM: ${{ secrets.YT_REFRESH_YADAM }}
+        run: |
+          if [ "$(date -u +%H)" != "21" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then echo "06시 회차만"; exit 0; fi
+          if [ -z "$YT_OAUTH_CLIENT_ID" ]; then echo "OAuth 없음 — 건너뜀"; exit 0; fi
+          python3 perf/analytics.py
+      - name: 📊 스튜디오 실시간 지표
+        if: env.SKIP != '1'
+        continue-on-error: true
+        env:
+          YT_STUDIO_COOKIE: ${{ secrets.YT_STUDIO_COOKIE }}
+        run: |
+          if [ -z "$YT_STUDIO_COOKIE" ]; then echo "쿠키 없음 — 건너뜀"; exit 0; fi
+          python3 perf/studio.py
+      - name: 커밋
+        if: env.SKIP != '1'
+        run: |
+          git config user.name "hot-bot"; git config user.email "hot-bot@users.noreply.github.com"
+          python3 bench/sync_marks.py || true
+          python3 bookmarks/sync.py || true   # ⭐ 떡상 북마크(ntfy→bookmarks.json)
+          git add bench/marks.json bookmarks/bookmarks.json hot/channels.json hot/data.json hot/snap.json hot/trend.json hot/factors.json hot/vph.json hot/lineage.json hot/underdog.json hot/db timing/data.json lineplan/data.json hot/radar.json bench/data.json hot/origin.json
+          git add perf/videos.json perf/history.json perf/analytics.json perf/reach.json perf/studio.json 2>/dev/null || true
+          git diff --cached --quiet && exit 0
+          git commit -m "떡상 수집 $(TZ=Asia/Seoul date '+%m/%d %H:%M')"
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
+      - name: Cloudflare Pages 배포 (초안·대본 원본 제외)
+        if: env.SKIP != '1'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash .runner/scripts/deploy.sh "$GITHUB_WORKSPACE"

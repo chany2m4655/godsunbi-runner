@@ -1,0 +1,33 @@
+# (2026-11-26 이전: godsunbi/.github/workflows/lipsync-run.yml) 공개 실행기로 이동 — 체크아웃→실행→godsunbi 로 커밋.
+name: 훅 입싱크
+on:
+  workflow_dispatch:
+    inputs:
+      dir: {description: "폴더(veo.mp4, audio.wav)", required: true}
+      t: {description: "길이(초)", required: true}
+      whisper: {description: "모델", required: false, default: "small"}
+permissions:
+  contents: read   # 쓰기는 PRIVATE_REPO_TOKEN 으로 godsunbi 에
+concurrency: {group: godsunbi-lipsync, cancel-in-progress: false}
+jobs:
+  ls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: chany2m4655/godsunbi   # 비공개 저장소 (코드·데이터는 그대로 거기)
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          path: .runner                      # 이 저장소(배포·산출물 스크립트)
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg && pip install -q faster-whisper numpy
+      - env: {LIPSYNC_WHISPER: "${{ inputs.whisper }}"}
+        run: |
+          cd "${{ inputs.dir }}"
+          python ../../tools/ls/lipsync.py --veo veo.mp4 --audio audio.wav --ss 0 --t ${{ inputs.t }} --out ls.mp4 > ls_info.txt; echo "결과는 ls_info.txt (로그 비공개)"
+      - if: always()
+        run: |
+          git config user.name hark-bot; git config user.email bot@users.noreply.github.com
+          git add "${{ inputs.dir }}"; git diff --cached --quiet && exit 0
+          git commit -m "입싱크 결과"; for i in 1 2 3; do git pull --rebase && git push && break; sleep 5; done

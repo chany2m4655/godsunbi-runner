@@ -1,0 +1,30 @@
+# (2026-11-26 이전: godsunbi/.github/workflows/narr-audition.yml) 공개 실행기로 이동 — 체크아웃→실행→godsunbi 로 커밋.
+# ⚠ 유료 Gemini 키 사용 — 사용자 허락 후에만. 공개 아티팩트 없음(결과는 godsunbi voices/gemini/narr 로 커밋).
+name: 제미나이 내레이터 오디션
+on: workflow_dispatch
+permissions:
+  contents: read   # 쓰기는 PRIVATE_REPO_TOKEN 으로 godsunbi 에
+concurrency: {group: godsunbi-narr-audition, cancel-in-progress: false}
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: chany2m4655/godsunbi   # 비공개 저장소 (코드·데이터는 그대로 거기)
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          path: .runner                      # 이 저장소(배포·산출물 스크립트)
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
+      - env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_NO_LITE: "1"
+        run: python -u apidub/narr_audition.py
+      - run: |
+          git config user.name hark-bot; git config user.email bot@users.noreply.github.com
+          git add voices/gemini/narr; git diff --cached --quiet && exit 0
+          git commit -m "voices: 제미나이 내레이터 오디션"; for i in 1 2 3; do git pull --rebase && git push && break; sleep 5; done

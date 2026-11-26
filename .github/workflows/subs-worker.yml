@@ -1,0 +1,24 @@
+# (2026-11-26 이전: godsunbi/.github/workflows/subs-worker.yml) 공개 실행기로 이동 — 체크아웃→실행→godsunbi 로 커밋.
+# 비공개 저장소 push 트리거는 여기서 받을 수 없어 수동 실행만.
+name: subs-worker
+on:
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency: {group: godsunbi-subs-worker}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: chany2m4655/godsunbi   # 비공개 저장소 (코드·데이터는 그대로 거기)
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          path: .runner                      # 이 저장소(배포·산출물 스크립트)
+      - name: 배포
+        working-directory: subs-worker
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx -y wrangler@4 deploy

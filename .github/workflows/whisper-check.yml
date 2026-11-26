@@ -1,0 +1,42 @@
+# (2026-11-26 이전: godsunbi/.github/workflows/whisper-check.yml) 공개 실행기로 이동 — 체크아웃→실행→godsunbi 로 커밋.
+name: 휘스퍼 인식 검사
+on:
+  workflow_dispatch:
+    inputs:
+      dir: {description: "wav 폴더(재귀)", required: true}
+      model: {description: "모델", required: false, default: "medium"}
+permissions:
+  contents: read   # 쓰기는 PRIVATE_REPO_TOKEN 으로 godsunbi 에
+concurrency: {group: godsunbi-whisper, cancel-in-progress: false}
+jobs:
+  w:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: chany2m4655/godsunbi   # 비공개 저장소 (코드·데이터는 그대로 거기)
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          path: .runner                      # 이 저장소(배포·산출물 스크립트)
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg && pip install -q faster-whisper
+      - run: |
+          python - "${{ inputs.dir }}" "${{ inputs.model }}" <<'PY'
+          import sys,glob,json,subprocess,numpy as np
+          from faster_whisper import WhisperModel
+          d,mn=sys.argv[1:]
+          m=WhisperModel(mn,device='cpu',compute_type='int8')
+          res={}
+          for f in sorted(glob.glob(d+'/**/*.wav',recursive=True)):
+              b=subprocess.run(['ffmpeg','-v','error','-i',f,'-ac','1','-ar','16000','-f','f32le','-'],capture_output=True).stdout
+              x=np.frombuffer(b,np.float32)
+              segs,_=m.transcribe(x,language='ko',beam_size=5,condition_on_previous_text=False)
+              res[f]=' '.join(s.text.strip() for s in segs); print(len(res),'개 인식(내용은 결과 json, 로그 비공개)',flush=True)
+          json.dump(res,open(d+'/whisper_'+mn+'.json','w'),ensure_ascii=False,indent=1)
+          PY
+      - if: always()
+        run: |
+          git config user.name hark-bot; git config user.email bot@users.noreply.github.com
+          git add "${{ inputs.dir }}"; git diff --cached --quiet && exit 0
+          git commit -m "whisper 결과"; for i in 1 2 3; do git pull --rebase && git push && break; sleep 5; done

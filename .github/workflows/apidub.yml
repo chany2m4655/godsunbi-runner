@@ -1,0 +1,102 @@
+# (2026-11-26 이전: godsunbi/.github/workflows/apidub.yml) 공개 실행기로 이동.
+# 공개 로그 보호: 편 이름은 마스킹, 대사 원문은 로그에서 잘라냄, 입력값은 이벤트 파일에서 읽음(로그에 안 찍힘).
+# 공개 아티팩트 없음: 더빙 결과(out/)는 비공개 godsunbi 의 'apidub-out' 브랜치 {편}/{run_id}/ 에 저장.
+# 조각 캐시는 암호화(aes-256, 키=PRIVATE_REPO_TOKEN)해서 저장.
+# ⚠ 유료 API(Gemini 결제 키·ElevenLabs) 사용 — 사용자 허락 후에만 실행.
+name: API 더빙
+run-name: "API 더빙 ${{ inputs.engine }} #${{ github.run_number }}"
+on:
+  workflow_dispatch:
+    inputs:
+      engine: {description: "gemini 또는 elevenlabs", required: true, default: gemini}
+      ep: {description: "편 이름 (godsunbi apidub/in/{ep}.txt)", required: true}
+      sections: {description: "섹션 (예 0,1 / 빈칸=전체)", required: false, default: "0,1"}
+      model: {description: "모델 (빈칸=기본)", required: false, default: ""}
+      lite: {description: "한도 시 flash-lite 폴백 (0=끔,1=켬)", required: false, default: "1"}
+      relite: {description: "1=라이트 조각을 메인 모델로 다시", required: false, default: "0"}
+      redo: {description: "gemini: 이 인물만 preset 보이스로 새로(쉼표), 빈칸=전부 preset", required: false, default: ""}
+      redesign: {description: "디자인 보이스 키 소진 시 다른 프로젝트에 사본 디자인 (0/1)", required: false, default: "0"}
+permissions:
+  contents: read
+concurrency:
+  group: godsunbi-apidub-${{ inputs.engine }}
+  cancel-in-progress: false
+jobs:
+  dub:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: 입력 읽기 (로그 비공개)
+        id: in
+        run: |
+          J="$GITHUB_EVENT_PATH"
+          EP=$(jq -r '.inputs.ep // ""' "$J"); echo "::add-mask::$EP"
+          for k in ep sections model lite relite redo redesign; do
+            v=$(jq -r ".inputs.$k // \"\"" "$J"); echo "IN_${k^^}=$v" >> "$GITHUB_ENV"
+          done
+          echo "eph=$(printf '%s' "$EP" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: chany2m4655/godsunbi
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          path: .runner
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
+      - name: 조각 캐시 복원 (암호화본)
+        uses: actions/cache/restore@v4
+        with:
+          path: apidub_cache.enc
+          key: apidub-enc-${{ inputs.engine }}-${{ steps.in.outputs.eph }}-${{ github.run_id }}
+          restore-keys: apidub-enc-${{ inputs.engine }}-${{ steps.in.outputs.eph }}-
+      - name: 캐시 풀기
+        env: {CK: "${{ secrets.PRIVATE_REPO_TOKEN }}"}
+        run: |
+          if [ -f apidub_cache.enc ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -pass env:CK -in apidub_cache.enc | tar xz && echo "캐시 복원" || echo "캐시 해독 실패 — 새로 생성"
+            rm -f apidub_cache.enc
+          else echo "캐시 없음"; fi
+      - name: 더빙 (대사 원문은 로그에서 생략)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_API_KEY_4: ${{ secrets.GEMINI_API_KEY_4 }}
+          GEMINI_API_KEY_5: ${{ secrets.GEMINI_API_KEY_5 }}
+          GEMINI_API_KEY_6: ${{ secrets.GEMINI_API_KEY_6 }}
+          GEMINI_API_KEY_7: ${{ secrets.GEMINI_API_KEY_7 }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ENGINE: ${{ inputs.engine }}
+        run: |
+          set -o pipefail
+          export GEMINI_NO_LITE=$([ "$IN_LITE" = "1" ] && echo 0 || echo 1)   # 한 편 음질 통일
+          export GEMINI_REDESIGN="$IN_REDESIGN"
+          python -u apidub/apidub.py --engine "$ENGINE" --ep "$IN_EP" --sections "$IN_SECTIONS" --model "$IN_MODEL" --out out --redo "$IN_REDO" --relite "$IN_RELITE" 2>&1 \
+            | sed -u -E 's/^(\s*\[(생성 )?[0-9]+\/[0-9]+\] s[0-9]+ [^(]*\([^)]*\)) .*$/\1 …/'
+      - name: 조각 캐시 암호화
+        if: always()
+        env: {CK: "${{ secrets.PRIVATE_REPO_TOKEN }}"}
+        run: |
+          if [ -d apidub_cache ]; then tar cz apidub_cache | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:CK -out apidub_cache.enc; rm -rf apidub_cache; fi
+      - name: 조각 캐시 저장
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: apidub_cache.enc
+          key: apidub-enc-${{ inputs.engine }}-${{ steps.in.outputs.eph }}-${{ github.run_id }}
+      - name: 정확한 자막(ElevenLabs 정렬, 엔진 무관)
+        continue-on-error: true
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+        run: python -u apidub/fa_srt.py out
+      - name: 보이스 ID 저장 (→ godsunbi main)
+        if: always()
+        run: |
+          git config user.name hark-bot; git config user.email bot@users.noreply.github.com
+          git add apidub/voices_*.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "apidub: voice ids" && git pull --rebase && git push)
+      - name: 결과 저장 (→ godsunbi 'apidub-out' 브랜치, 공개 아티팩트 없음)
+        if: always()
+        env: {GH_PAT: "${{ secrets.PRIVATE_REPO_TOKEN }}"}
+        run: bash .runner/scripts/push_out.sh apidub-out out "$IN_EP/${{ github.run_id }}"

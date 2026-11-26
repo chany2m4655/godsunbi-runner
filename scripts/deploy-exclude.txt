@@ -1,0 +1,29 @@
+# godsunbi.pages.dev 배포에서 빼는 것 (scripts/stage.py 형식: /로 시작=루트 기준 경로, 아니면 이름)
+# 원칙: 사이트가 쓰지 않는 원본·초안·코드·작업물은 올리지 않는다.
+.git
+/.github
+/.runner
+/.gitignore
+__pycache__
+*.pyc
+*.py
+*.toml
+*.sh
+# 더빙 입력 원본(대본·문장·캐스팅·감정). TTS 페이지가 쓰는 {ep}.plan.json, plans.json 은 남김.
+/apidub/in/*.txt
+/apidub/in/*.csv
+/apidub/in/*.cast.json
+/apidub/in/*.emotion.json
+/apidub/in/*.override
+/apidub_cache
+/apidub_cache.enc
+/out
+# 사이트가 안 쓰는 작업 폴더
+/lsjob
+/linetest
+/merge
+/origdl
+/shorts_dl
+/tools
+/perf/worker
+/subs-worker

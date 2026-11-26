@@ -1,0 +1,33 @@
+# (2026-11-26 이전: godsunbi/.github/workflows/shortsdl.yml) 공개 실행기로 이동 — 체크아웃→실행→godsunbi 로 커밋.
+name: shortsdl
+on:
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency: {group: godsunbi-shortsdl, cancel-in-progress: false}
+jobs:
+  dl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: chany2m4655/godsunbi   # 비공개 저장소 (코드·데이터는 그대로 거기)
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          path: .runner                      # 이 저장소(배포·산출물 스크립트)
+      - run: |
+          pip install -q -U yt-dlp
+          sudo apt-get -qq install -y ffmpeg >/dev/null
+          mkdir -p out
+          while read id; do
+            [ -z "$id" ] && continue
+            yt-dlp -q --no-warnings -f "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]/b" --merge-output-format mp4 \
+              -o "out/%(id)s.%(ext)s" "https://www.youtube.com/shorts/$id" || echo "FAIL $id" >> out/fail.txt
+            sleep 3
+          done < shorts_dl/ids.txt
+          ls out | wc -l; cat out/fail.txt 2>/dev/null || true
+      - name: 결과 저장 (→ godsunbi 'shortsdl-out' 브랜치, 공개 아티팩트 없음)
+        if: always()
+        env: {GH_PAT: "${{ secrets.PRIVATE_REPO_TOKEN }}"}
+        run: bash .runner/scripts/push_out.sh shortsdl-out out "${{ github.run_id }}"

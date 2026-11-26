@@ -1,0 +1,56 @@
+# (2026-11-26 이전: godsunbi/.github/workflows/hot-deep.yml) 공개 실행기로 이동 — 코드·데이터는 비공개 godsunbi 에 그대로, 여기선 체크아웃→실행→커밋만.
+name: 떡상 심층 수집 (대본·화풍)
+on:
+  schedule:
+    - cron: "40 21 * * *"   # 매일 KST 06:40 (밤 수집 안 함, 2026-11-25)
+  workflow_dispatch:
+    inputs:
+      n: {description: "자막 수집 편수", default: "200"}
+permissions:
+  contents: read
+concurrency:
+  group: godsunbi-hot-deep
+  cancel-in-progress: false
+jobs:
+  deep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: chany2m4655/godsunbi   # 비공개 저장소 (코드·데이터는 그대로 거기)
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          path: .runner                      # 이 저장소(배포·산출물 스크립트)
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: 준비
+        run: |
+          curl -s -m 5 -d "{\"stage\":\"준비(도구 설치)\",\"pct\":3,\"run\":\"$GITHUB_RUN_ID\"}" https://ntfy.sh/gatseonbi-lab-q7x3k9 || true
+          pip install -q -U yt-dlp pillow bgutil-ytdlp-pot-provider
+          docker run -d --name bgutil -p 4416:4416 --init brainicism/bgutil-ytdlp-pot-provider
+          sleep 5
+          pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -q open_clip_torch
+      - name: 수집
+        env:
+          DEEP_N: ${{ inputs.n || '200' }}
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: |
+          if [ -n "$YT_COOKIES" ]; then printf '%s' "$YT_COOKIES" > /tmp/cookies.txt; export YT_COOKIES_FILE=/tmp/cookies.txt; fi
+          python3 hot/deep.py
+      - name: 분석
+        run: |
+          curl -s -m 5 -d "{\"stage\":\"실험 계산\",\"pct\":92,\"run\":\"$GITHUB_RUN_ID\"}" https://ntfy.sh/gatseonbi-lab-q7x3k9 || true
+          python3 hot/factors.py || true
+          python3 hot/lineage_link.py || true
+          python3 lab/run.py || true
+          curl -s -m 5 -d "{\"stage\":\"완료 (페이지 반영은 다음 떡상 갱신 때)\",\"pct\":100,\"run\":\"$GITHUB_RUN_ID\"}" https://ntfy.sh/gatseonbi-lab-q7x3k9 || true
+      - name: 커밋
+        run: |
+          git config user.name "hot-bot"; git config user.email "hot-bot@users.noreply.github.com"
+          git add hot/db hot/factors.json hot/lineage.json lab/history.json lab/hits_auto.json
+          git diff --cached --quiet && exit 0
+          git commit -m "떡상 심층 $(TZ=Asia/Seoul date '+%m/%d %H:%M')"
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done

@@ -1,0 +1,70 @@
+# (2026-11-26 이전: godsunbi/.github/workflows/merge.yml) 공개 실행기로 이동. 스튜디오 #merge 탭이 이 저장소로 dispatch.
+# 공개 로그 보호: job JSON 은 이벤트 파일에서 읽고(로그에 안 찍힘), 그 안의 Drive ID·편 이름은 전부 마스킹.
+# 리포트는 공개 아티팩트 대신 비공개 godsunbi 의 'merge-reports' 브랜치 {run_id}/ 에 저장.
+name: 갓선비 합치기
+run-name: "합치기 #${{ github.run_number }}"
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "합치기 설정 JSON (스튜디오 #merge 탭이 채움)"
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: godsunbi-merge
+  cancel-in-progress: false
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: 작업 공간(큰 디스크) + job 읽기 (ID 마스킹)
+        run: |
+          W=/mnt/merge; sudo mkdir -p $W && sudo chown $USER $W || { W=$RUNNER_TEMP/merge; mkdir -p $W; }
+          echo "MERGE_WORK=$W" >> $GITHUB_ENV
+          jq -r '.inputs.job' "$GITHUB_EVENT_PATH" > "$W/job.json"
+          jq -r '.. | strings' "$W/job.json" | grep -oE '[A-Za-z0-9_-]{20,}' | sort -u | while read -r x; do echo "::add-mask::$x"; done
+          EP=$(jq -r '.ep // empty' "$W/job.json" 2>/dev/null || true); [ -n "$EP" ] && echo "::add-mask::$EP"
+          echo "WHISPER_MODEL=$(jq -r '.whisper_model // "medium"' "$W/job.json" 2>/dev/null || echo medium)" >> $GITHUB_ENV
+          df -h / /mnt || true
+      - uses: actions/checkout@v4
+        with:
+          repository: chany2m4655/godsunbi
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          sparse-checkout: merge
+      - uses: actions/checkout@v4
+        with:
+          path: .runner
+      - name: ffmpeg 설치
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          ffmpeg -version | head -1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: merge/requirements.txt
+      - run: pip install -q -r merge/requirements.txt
+      - name: Whisper 모델 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: whisper-${{ env.WHISPER_MODEL }}-v1
+      - name: 합치기
+        env:
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
+        run: |
+          set -o pipefail
+          python -u merge/merge.py --job "$MERGE_WORK/job.json" --work "$MERGE_WORK" 2>&1 \
+            | sed -u -E 's#https://(drive|docs)\.google\.com/[^ "]*#[drive 링크]#g'
+      - name: 리포트 보관 (→ godsunbi 'merge-reports' 브랜치)
+        if: always()
+        env: {GH_PAT: "${{ secrets.PRIVATE_REPO_TOKEN }}"}
+        run: |
+          mkdir -p "$RUNNER_TEMP/rep"; cp "$MERGE_WORK"/*_report.txt "$RUNNER_TEMP/rep/" 2>/dev/null || true
+          bash .runner/scripts/push_out.sh merge-reports "$RUNNER_TEMP/rep" "${{ github.run_id }}"

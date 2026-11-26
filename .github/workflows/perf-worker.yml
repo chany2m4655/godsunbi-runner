@@ -1,0 +1,63 @@
+# (2026-11-26 이전: godsunbi/.github/workflows/perf-worker.yml) 공개 실행기로 이동 — 체크아웃→실행→godsunbi 로 커밋.
+# 주의: 실행하면 Worker 시크릿을 지금 이 저장소 시크릿 값으로 덮어씀(YT OAuth·refresh 시크릿은 여기 없음 → 빠짐).
+name: 성과 수집 Worker 설치 (Cloudflare 크론)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read   # 쓰기는 PRIVATE_REPO_TOKEN 으로 godsunbi 에
+concurrency: {group: godsunbi-perf-worker, cancel-in-progress: false}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: chany2m4655/godsunbi   # 비공개 저장소 (코드·데이터는 그대로 거기)
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          path: .runner                      # 이 저장소(배포·산출물 스크립트)
+      - name: KV 준비
+        working-directory: perf/worker
+        run: |
+          ID=$(npx -y wrangler@4 kv namespace list | python3 -c "import sys,json;a=json.load(sys.stdin);print(next((x['id'] for x in a if x['title'].endswith('PERF') or x['title']=='godsunbi-perf-PERF'),''))")
+          if [ -z "$ID" ]; then
+            npx -y wrangler@4 kv namespace create PERF | tee kv.txt
+            ID=$(grep -oE '[0-9a-f]{32}' kv.txt | head -1)
+          fi
+          echo "KV=$ID"; sed -i "s/__KV_ID__/$ID/" wrangler.toml
+      - name: 배포
+        working-directory: perf/worker
+        run: npx -y wrangler@4 deploy | tee deploy.txt
+      - name: 시크릿
+        working-directory: perf/worker
+        env:
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}
+          YT_OAUTH_CLIENT_ID: ${{ secrets.YT_OAUTH_CLIENT_ID }}
+          YT_OAUTH_CLIENT_SECRET: ${{ secrets.YT_OAUTH_CLIENT_SECRET }}
+          YT_REFRESH_GODSUNBI: ${{ secrets.YT_REFRESH_GODSUNBI }}
+          YT_REFRESH_YADAM: ${{ secrets.YT_REFRESH_YADAM }}
+        run: |
+          RUN_KEY=$(openssl rand -hex 16); echo "::add-mask::$RUN_KEY"
+          python3 - <<'PY' > secrets.json
+          import json,os
+          ks=["YT_API_KEY","YT_OAUTH_CLIENT_ID","YT_OAUTH_CLIENT_SECRET","YT_REFRESH_GODSUNBI","YT_REFRESH_YADAM"]
+          d={k:os.environ[k] for k in ks if os.environ.get(k)}
+          print(json.dumps(d))
+          PY
+          python3 -c "import json,sys;d=json.load(open('secrets.json'));d['RUN_KEY']=sys.argv[1];json.dump(d,open('secrets.json','w'))" "$RUN_KEY"
+          npx -y wrangler@4 secret bulk secrets.json; rm -f secrets.json
+          URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' deploy.txt | head -1)
+          echo "URL=$URL"; echo "URL=$URL" >> $GITHUB_ENV
+          sleep 5; curl -s -o /dev/null -w "첫 실행 HTTP %{http_code}\n" "$URL/run?k=$RUN_KEY"
+      - name: 페이지에 API 주소 기록
+        run: |
+          echo "{\"api\":\"$URL\"}" > perf/api.json
+          git config user.name "perf-bot"; git config user.email "perf-bot@users.noreply.github.com"
+          git add perf/api.json; git diff --cached --quiet || git commit -m "성과 Worker 주소 기록"
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
+      - name: Cloudflare Pages 배포 (초안·대본 원본 제외)
+        run: bash .runner/scripts/deploy.sh "$GITHUB_WORKSPACE"
