@@ -9,5 +9,7 @@ if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then echo "::error::secret CLOUDFLARE_API
 STAGE="${RUNNER_TEMP:-/tmp}/godsunbi-site"
 rm -rf "$STAGE"
 python3 "$HERE/stage.py" "$SRC" "$STAGE" "$HERE/deploy-exclude.txt"
+# 404.html 이 없으면 Cloudflare Pages 가 없는 경로에도 index.html 을 200 으로 돌려줌(SPA 모드) → 진짜 404 가 나도록 추가
+[ -f "$STAGE/404.html" ] || printf '<!doctype html><meta charset="utf-8"><title>404</title><p>페이지를 찾을 수 없어요. <a href="/">갓선비 스튜디오로</a></p>\n' > "$STAGE/404.html"
 cd "$STAGE"   # functions/ 가 여기 있어야 Pages Functions 도 함께 배포됨
 npx -y wrangler@4 pages deploy . --project-name godsunbi --branch main --commit-dirty=true
