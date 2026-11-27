@@ -1,8 +1,7 @@
 # (2026-11-26 이전: godsunbi/.github/workflows/hot-deep.yml) 공개 실행기로 이동 — 코드·데이터는 비공개 godsunbi 에 그대로, 여기선 체크아웃→실행→커밋만.
 name: 떡상 심층 수집 (대본·화풍)
 on:
-  schedule:
-    - cron: "40 21 * * *"   # 매일 KST 06:40 (밤 수집 안 함, 2026-11-25)
+  # schedule 제거(2026-11-27): cron-job.org가 같은 시각에 dispatch로 호출 — 중복 방지
   workflow_dispatch:
     inputs:
       n: {description: "자막 수집 편수", default: "200"}
