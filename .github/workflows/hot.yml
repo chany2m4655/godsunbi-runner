@@ -1,8 +1,7 @@
 # (2026-11-26 이전: godsunbi/.github/workflows/hot.yml) 공개 실행기로 이동 — 코드·데이터는 비공개 godsunbi 에 그대로, 여기선 체크아웃→실행→커밋만.
 name: 떡상 야담 수집
 on:
-  schedule:
-    - cron: "0 21,1,5,9,13 * * *"   # 하루 5번 통합 수집 KST 06·10·14·18·22시, 밤엔 안 함 — 떡상·레이더·성과 한꺼번에(2026-11-25, Actions 절약). 하루 1회 작업은 06시 회차(UTC 21).
+  # schedule 제거(2026-11-27): cron-job.org가 같은 시각에 dispatch로 호출 — 중복 방지
   workflow_dispatch:
 permissions:
   contents: read   # 쓰기는 PRIVATE_REPO_TOKEN 으로 godsunbi 에
